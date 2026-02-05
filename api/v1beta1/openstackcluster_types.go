@@ -174,6 +174,18 @@ type OpenStackClusterSpec struct {
 	// +optional
 	ControlPlaneAvailabilityZones []string `json:"controlPlaneAvailabilityZones,omitempty"`
 
+	// FailureDomainSubnets is a mapping of availability zones to subnets.
+	// When specified, machines will be created in the subnet corresponding to their
+	// failure domain (availability zone). This enables deploying control-plane nodes
+	// across multiple subnets in different availability zones, similar to CAPA's
+	// multi-AZ subnet support.
+	// If a machine's failure domain is not found in this mapping, the default cluster
+	// subnet(s) will be used.
+	// +listType=map
+	// +listMapKey=availabilityZone
+	// +optional
+	FailureDomainSubnets []FailureDomainSubnet `json:"failureDomainSubnets,omitempty"`
+
 	// ControlPlaneOmitAvailabilityZone causes availability zone to be
 	// omitted when creating control plane nodes, allowing the Nova
 	// scheduler to make a decision on which availability zone to use based

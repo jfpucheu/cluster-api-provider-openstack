@@ -561,8 +561,26 @@ func openStackMachineSpecToOpenStackServerSpec(openStackMachineSpec *infrav1.Ope
 		serverPorts = make([]infrav1.PortOpts, 1)
 	}
 
+	// Determine the subnets to use for the machine ports.
+	// If FailureDomainSubnets is configured and a mapping exists for the machine's
+	// failure domain (availability zone), use the subnet from the mapping.
+	// Otherwise, fall back to the cluster's default subnets.
 	var clusterSubnets []infrav1.FixedIP
-	if len(openStackCluster.Spec.Subnets) > 0 {
+	if failureDomain != "" && len(openStackCluster.Spec.FailureDomainSubnets) > 0 {
+		// Look for a subnet mapping for this failure domain
+		for _, fdSubnet := range openStackCluster.Spec.FailureDomainSubnets {
+			if fdSubnet.AvailabilityZone == failureDomain {
+				clusterSubnets = []infrav1.FixedIP{
+					{
+						Subnet: &fdSubnet.Subnet,
+					},
+				}
+				break
+			}
+		}
+	}
+	// Fall back to cluster-level subnets if no failure domain mapping was found
+	if len(clusterSubnets) == 0 && len(openStackCluster.Spec.Subnets) > 0 {
 		clusterSubnets = make([]infrav1.FixedIP, len(openStackCluster.Spec.Subnets))
 		for idx, sn := range openStackCluster.Spec.Subnets {
 			clusterSubnets[idx] = infrav1.FixedIP{

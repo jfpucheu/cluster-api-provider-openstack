@@ -46,6 +46,9 @@ import (
 const (
 	networkUUID                   = "d412171b-9fd7-41c1-95a6-c24e5953974d"
 	subnetUUID                    = "d2d8d98d-b234-477e-a547-868b7cb5d6a5"
+	subnetAZ1UUID                 = "a1a1a1a1-1111-1111-1111-111111111111"
+	subnetAZ2UUID                 = "b2b2b2b2-2222-2222-2222-222222222222"
+	subnetAZ3UUID                 = "c3c3c3c3-3333-3333-3333-333333333333"
 	extraSecurityGroupUUID        = "514bb2d8-3390-4a3b-86a7-7864ba57b329"
 	controlPlaneSecurityGroupUUID = "c9817a91-4821-42db-8367-2301002ab659"
 	workerSecurityGroupUUID       = "9c6c0d28-03c9-436c-815d-58440ac2c1c8"
@@ -396,6 +399,181 @@ func TestOpenStackMachineSpecToOpenStackServerSpec(t *testing.T) {
 		tt := tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			spec, err := openStackMachineSpecToOpenStackServerSpec(tt.spec, identityRef, tags, "", userData, &openStackCluster.Status.WorkerSecurityGroup.ID, tt.cluster)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("openStackMachineSpecToOpenStackServerSpec() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !reflect.DeepEqual(spec, tt.want) {
+				t.Errorf("openStackMachineSpecToOpenStackServerSpec() got = %+v, want %+v", spec, tt.want)
+			}
+		})
+	}
+}
+
+// TestOpenStackMachineSpecToOpenStackServerSpecWithFailureDomainSubnets tests the
+// failureDomainSubnets feature that maps availability zones to specific subnets.
+func TestOpenStackMachineSpecToOpenStackServerSpecWithFailureDomainSubnets(t *testing.T) {
+	identityRef := infrav1.OpenStackIdentityReference{
+		Name:      "foo",
+		CloudName: "my-cloud",
+	}
+	tags := []string{"tag1", "tag2"}
+	userData := &corev1.LocalObjectReference{Name: "server-data-secret"}
+	image := infrav1.ImageParam{Filter: &infrav1.ImageFilter{Name: ptr.To("my-image")}}
+
+	// Cluster with FailureDomainSubnets configured for multi-AZ deployment
+	openStackClusterWithFailureDomainSubnets := &infrav1.OpenStackCluster{
+		Spec: infrav1.OpenStackClusterSpec{
+			ManagedSecurityGroups: &infrav1.ManagedSecurityGroups{},
+			ControlPlaneAvailabilityZones: []string{"az1", "az2", "az3"},
+			FailureDomainSubnets: []infrav1.FailureDomainSubnet{
+				{
+					AvailabilityZone: "az1",
+					Subnet:           infrav1.SubnetParam{ID: ptr.To(subnetAZ1UUID)},
+				},
+				{
+					AvailabilityZone: "az2",
+					Subnet:           infrav1.SubnetParam{ID: ptr.To(subnetAZ2UUID)},
+				},
+				{
+					AvailabilityZone: "az3",
+					Subnet:           infrav1.SubnetParam{ID: ptr.To(subnetAZ3UUID)},
+				},
+			},
+			// Also has default subnets as fallback
+			Subnets: []infrav1.SubnetParam{
+				{ID: ptr.To(subnetUUID)},
+			},
+		},
+		Status: infrav1.OpenStackClusterStatus{
+			ControlPlaneSecurityGroup: &infrav1.SecurityGroupStatus{
+				ID: controlPlaneSecurityGroupUUID,
+			},
+			Network: &infrav1.NetworkStatusWithSubnets{
+				NetworkStatus: infrav1.NetworkStatus{
+					ID: networkUUID,
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		cluster       *infrav1.OpenStackCluster
+		spec          *infrav1.OpenStackMachineSpec
+		failureDomain string
+		want          *infrav1alpha1.OpenStackServerSpec
+		wantErr       bool
+	}{
+		{
+			name:          "Machine in az1 uses subnet from FailureDomainSubnets mapping",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "az1",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:           ptr.To(flavorName),
+				IdentityRef:      identityRef,
+				Image:            image,
+				SSHKeyName:       sshKeyName,
+				AvailabilityZone: ptr.To("az1"),
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To(networkUUID)},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To(subnetAZ1UUID)},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
+		{
+			name:          "Machine in az2 uses subnet from FailureDomainSubnets mapping",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "az2",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:           ptr.To(flavorName),
+				IdentityRef:      identityRef,
+				Image:            image,
+				SSHKeyName:       sshKeyName,
+				AvailabilityZone: ptr.To("az2"),
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To(networkUUID)},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To(subnetAZ2UUID)},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
+		{
+			name:          "Machine with unknown AZ falls back to default cluster subnets",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "unknown-az",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:           ptr.To(flavorName),
+				IdentityRef:      identityRef,
+				Image:            image,
+				SSHKeyName:       sshKeyName,
+				AvailabilityZone: ptr.To("unknown-az"),
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To(networkUUID)},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To(subnetUUID)},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
+		{
+			name:          "Machine without failureDomain falls back to default cluster subnets",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:      ptr.To(flavorName),
+				IdentityRef: identityRef,
+				Image:       image,
+				SSHKeyName:  sshKeyName,
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To(networkUUID)},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To(subnetUUID)},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
+	}
+
+	for i := range tests {
+		tt := tests[i]
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := openStackMachineSpecToOpenStackServerSpec(tt.spec, identityRef, tags, tt.failureDomain, userData, &tt.cluster.Status.ControlPlaneSecurityGroup.ID, tt.cluster)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("openStackMachineSpecToOpenStackServerSpec() error = %v, wantErr %v", err, tt.wantErr)
 				return

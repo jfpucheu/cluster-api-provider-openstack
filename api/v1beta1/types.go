@@ -290,6 +290,23 @@ type AllocationPool struct {
 	End string `json:"end"`
 }
 
+// FailureDomainSubnet maps an availability zone (failure domain) to a specific subnet.
+// This allows control-plane and worker nodes to be placed in different subnets
+// based on their failure domain (availability zone) placement.
+type FailureDomainSubnet struct {
+	// AvailabilityZone is the name of the Nova/Cinder availability zone that this
+	// subnet mapping applies to. This should match one of the availability zones
+	// configured in controlPlaneAvailabilityZones or used by MachineDeployments.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	AvailabilityZone string `json:"availabilityZone"`
+
+	// Subnet specifies the subnet to use for machines deployed in this availability zone.
+	// The subnet must be part of the cluster network.
+	// +kubebuilder:validation:Required
+	Subnet SubnetParam `json:"subnet"`
+}
+
 type PortOpts struct {
 	// Network is a query for an openstack network that the port will be created or discovered on.
 	// This will fail if the query returns more than one network.

@@ -15,6 +15,7 @@
     - [Per cluster](#per-cluster)
     - [Global configuration](#global-configuration)
   - [Availability zone](#availability-zone)
+    - [Multi-AZ subnet mapping (failureDomainSubnets)](#multi-az-subnet-mapping-failuredomainsubnets)
   - [DNS server](#dns-server)
   - [Machine flavor](#machine-flavor)
   - [CNI security group rules](#cni-security-group-rules)
@@ -209,6 +210,59 @@ kubectl patch deployment capo-controller-manager -n capo-system \
 The availability zone names must be exposed as an environment variable `OPENSTACK_FAILURE_DOMAIN`.
 
 By default, if `Availability zone` is not given, all `Availability zone` that defined in openstack will be a candidate to provision from, If administrator credential is used then `internal` Availability zone which is internal only Availability zone inside `nova` will be returned and can cause potential problem, see [PR 1165](https://github.com/kubernetes-sigs/cluster-api-provider-openstack/pull/1165) for further information. So we highly recommend to set `Availability zone` explicitly.
+
+### Multi-AZ subnet mapping (failureDomainSubnets)
+
+In some OpenStack deployments, each availability zone has its own dedicated subnet. To support control-plane and worker nodes deployment across multiple subnets based on their availability zone, you can use the `failureDomainSubnets` feature.
+
+This feature allows you to map each availability zone to a specific subnet. When a machine is created, CAPO will automatically select the appropriate subnet based on the machine's failure domain (availability zone).
+
+**Example configuration:**
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackCluster
+metadata:
+  name: multi-az-cluster
+  namespace: default
+spec:
+  identityRef:
+    name: openstack-cloud-config
+    cloudName: openstack
+  
+  # Define the availability zones for control plane nodes
+  controlPlaneAvailabilityZones:
+    - az1
+    - az2
+    - az3
+  
+  # Map each availability zone to its dedicated subnet
+  failureDomainSubnets:
+    - availabilityZone: az1
+      subnet:
+        id: "subnet-uuid-for-az1"
+    - availabilityZone: az2
+      subnet:
+        id: "subnet-uuid-for-az2"
+    - availabilityZone: az3
+      subnet:
+        id: "subnet-uuid-for-az3"
+  
+  # The network that contains all the subnets
+  network:
+    id: "network-uuid"
+  
+  # Optional: fallback subnets for machines without a failure domain mapping
+  subnets:
+    - id: "default-subnet-uuid"
+```
+
+**Behavior:**
+- When a machine's `failureDomain` matches an entry in `failureDomainSubnets`, the corresponding subnet will be used for the machine's network port.
+- If the machine's `failureDomain` is not found in the mapping, or if `failureDomain` is empty, CAPO falls back to the default `subnets` specified in the OpenStackCluster spec.
+- All subnets in `failureDomainSubnets` must belong to the same network specified in `spec.network`.
+
+This feature is similar to AWS CAPA's multi-AZ subnet support and enables highly available control-plane deployments across isolated network segments in each availability zone.
 
 ## DNS server
 
