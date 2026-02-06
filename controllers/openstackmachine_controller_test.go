@@ -568,6 +568,73 @@ func TestOpenStackMachineSpecToOpenStackServerSpecWithFailureDomainSubnets(t *te
 				UserDataRef: userData,
 			},
 		},
+		{
+			name:          "Machine with explicit network but no FixedIPs gets failureDomain subnet injected",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "az1",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+				Ports: []infrav1.PortOpts{
+					{
+						// Port with explicit network but no FixedIPs
+						Network: &infrav1.NetworkParam{ID: ptr.To("custom-network-uuid")},
+					},
+				},
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:           ptr.To(flavorName),
+				IdentityRef:      identityRef,
+				Image:            image,
+				SSHKeyName:       sshKeyName,
+				AvailabilityZone: ptr.To("az1"),
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To("custom-network-uuid")},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To(subnetAZ1UUID)},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
+		{
+			name:          "Machine with explicit network AND FixedIPs keeps its own FixedIPs",
+			cluster:       openStackClusterWithFailureDomainSubnets,
+			failureDomain: "az1",
+			spec: &infrav1.OpenStackMachineSpec{
+				Flavor:     ptr.To(flavorName),
+				Image:      image,
+				SSHKeyName: sshKeyName,
+				Ports: []infrav1.PortOpts{
+					{
+						// Port with explicit network AND explicit FixedIPs
+						Network: &infrav1.NetworkParam{ID: ptr.To("custom-network-uuid")},
+						FixedIPs: []infrav1.FixedIP{{
+							Subnet: &infrav1.SubnetParam{ID: ptr.To("user-specified-subnet-uuid")},
+						}},
+					},
+				},
+			},
+			want: &infrav1alpha1.OpenStackServerSpec{
+				Flavor:           ptr.To(flavorName),
+				IdentityRef:      identityRef,
+				Image:            image,
+				SSHKeyName:       sshKeyName,
+				AvailabilityZone: ptr.To("az1"),
+				Ports: []infrav1.PortOpts{{
+					Network: &infrav1.NetworkParam{ID: ptr.To("custom-network-uuid")},
+					FixedIPs: []infrav1.FixedIP{{
+						Subnet: &infrav1.SubnetParam{ID: ptr.To("user-specified-subnet-uuid")},
+					}},
+					SecurityGroups: []infrav1.SecurityGroupParam{{ID: ptr.To(controlPlaneSecurityGroupUUID)}},
+				}},
+				Tags:        tags,
+				UserDataRef: userData,
+			},
+		},
 	}
 
 	for i := range tests {

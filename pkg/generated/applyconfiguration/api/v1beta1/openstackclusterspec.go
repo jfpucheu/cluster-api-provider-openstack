@@ -43,6 +43,7 @@ type OpenStackClusterSpecApplyConfiguration struct {
 	Tags                             []string                                      `json:"tags,omitempty"`
 	ControlPlaneEndpoint             *corev1beta1.APIEndpoint                      `json:"controlPlaneEndpoint,omitempty"`
 	ControlPlaneAvailabilityZones    []string                                      `json:"controlPlaneAvailabilityZones,omitempty"`
+	FailureDomainSubnets             []FailureDomainSubnetApplyConfiguration       `json:"failureDomainSubnets,omitempty"`
 	ControlPlaneOmitAvailabilityZone *bool                                         `json:"controlPlaneOmitAvailabilityZone,omitempty"`
 	Bastion                          *BastionApplyConfiguration                    `json:"bastion,omitempty"`
 	IdentityRef                      *OpenStackIdentityReferenceApplyConfiguration `json:"identityRef,omitempty"`
@@ -213,6 +214,19 @@ func (b *OpenStackClusterSpecApplyConfiguration) WithControlPlaneEndpoint(value 
 func (b *OpenStackClusterSpecApplyConfiguration) WithControlPlaneAvailabilityZones(values ...string) *OpenStackClusterSpecApplyConfiguration {
 	for i := range values {
 		b.ControlPlaneAvailabilityZones = append(b.ControlPlaneAvailabilityZones, values[i])
+	}
+	return b
+}
+
+// WithFailureDomainSubnets adds the given value to the FailureDomainSubnets field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the FailureDomainSubnets field.
+func (b *OpenStackClusterSpecApplyConfiguration) WithFailureDomainSubnets(values ...*FailureDomainSubnetApplyConfiguration) *OpenStackClusterSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithFailureDomainSubnets")
+		}
+		b.FailureDomainSubnets = append(b.FailureDomainSubnets, *values[i])
 	}
 	return b
 }

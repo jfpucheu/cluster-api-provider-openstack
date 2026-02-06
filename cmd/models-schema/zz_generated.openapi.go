@@ -350,6 +350,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.BlockDeviceVolume":                          schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_BlockDeviceVolume(ref),
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ClusterInitialization":                      schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_ClusterInitialization(ref),
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ExternalRouterIPParam":                      schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_ExternalRouterIPParam(ref),
+		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.FailureDomainSubnet":                        schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_FailureDomainSubnet(ref),
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.FilterByNeutronTags":                        schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_FilterByNeutronTags(ref),
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.FixedIP":                                    schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_FixedIP(ref),
 		"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ImageFilter":                                schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_ImageFilter(ref),
@@ -18508,6 +18509,37 @@ func schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_ExternalRouterI
 	}
 }
 
+func schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_FailureDomainSubnet(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "FailureDomainSubnet maps an availability zone (failure domain) to a specific subnet. This allows control-plane and worker nodes to be placed in different subnets based on their failure domain (availability zone) placement.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"availabilityZone": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AvailabilityZone is the name of the Nova/Cinder availability zone that this subnet mapping applies to. This should match one of the availability zones configured in controlPlaneAvailabilityZones or used by MachineDeployments.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"subnet": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Subnet specifies the subnet to use for machines deployed in this availability zone. The subnet must be part of the cluster network.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetParam"),
+						},
+					},
+				},
+				Required: []string{"availabilityZone", "subnet"},
+			},
+		},
+		Dependencies: []string{
+			"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetParam"},
+	}
+}
+
 func schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_FilterByNeutronTags(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -19467,6 +19499,28 @@ func schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_OpenStackCluste
 							},
 						},
 					},
+					"failureDomainSubnets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"availabilityZone",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "FailureDomainSubnets is a mapping of availability zones to subnets. When specified, machines will be created in the subnet corresponding to their failure domain (availability zone). This enables deploying control-plane nodes across multiple subnets in different availability zones, similar to CAPA's multi-AZ subnet support. If a machine's failure domain is not found in this mapping, the default cluster subnet(s) will be used.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.FailureDomainSubnet"),
+									},
+								},
+							},
+						},
+					},
 					"controlPlaneOmitAvailabilityZone": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ControlPlaneOmitAvailabilityZone causes availability zone to be omitted when creating control plane nodes, allowing the Nova scheduler to make a decision on which availability zone to use based on other scheduling constraints",
@@ -19492,7 +19546,7 @@ func schema_sigsk8sio_cluster_api_provider_openstack_api_v1beta1_OpenStackCluste
 			},
 		},
 		Dependencies: []string{
-			"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.APIServerLoadBalancer", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.Bastion", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ExternalRouterIPParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ManagedSecurityGroups", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.NetworkParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.OpenStackIdentityReference", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.RouterParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetSpec", "sigs.k8s.io/cluster-api/api/core/v1beta1.APIEndpoint"},
+			"sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.APIServerLoadBalancer", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.Bastion", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ExternalRouterIPParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.FailureDomainSubnet", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.ManagedSecurityGroups", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.NetworkParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.OpenStackIdentityReference", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.RouterParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetParam", "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1.SubnetSpec", "sigs.k8s.io/cluster-api/api/core/v1beta1.APIEndpoint"},
 	}
 }
 

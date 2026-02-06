@@ -616,6 +616,17 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.SubnetParam
       default: {}
+- name: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.FailureDomainSubnet
+  map:
+    fields:
+    - name: availabilityZone
+      type:
+        scalar: string
+      default: ""
+    - name: subnet
+      type:
+        namedType: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.SubnetParam
+      default: {}
 - name: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.FixedIP
   map:
     fields:
@@ -889,6 +900,14 @@ var schemaYAML = typed.YAMLObject(`types:
           elementType:
             namedType: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.ExternalRouterIPParam
           elementRelationship: atomic
+    - name: failureDomainSubnets
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.FailureDomainSubnet
+          elementRelationship: associative
+          keys:
+          - availabilityZone
     - name: identityRef
       type:
         namedType: io.k8s.sigs.cluster-api-provider-openstack.api.v1beta1.OpenStackIdentityReference

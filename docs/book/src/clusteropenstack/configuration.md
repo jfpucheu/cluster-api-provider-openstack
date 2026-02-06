@@ -261,6 +261,9 @@ spec:
 - When a machine's `failureDomain` matches an entry in `failureDomainSubnets`, the corresponding subnet will be used for the machine's network port.
 - If the machine's `failureDomain` is not found in the mapping, or if `failureDomain` is empty, CAPO falls back to the default `subnets` specified in the OpenStackCluster spec.
 - All subnets in `failureDomainSubnets` must belong to the same network specified in `spec.network`.
+- For machines with explicit ports that have a network but no `FixedIPs` defined, the `failureDomainSubnets` mapping will also be applied when a matching availability zone is found. This ensures consistency across availability zones even for custom port configurations.
+- If a port already has explicit `FixedIPs` defined, those are preserved and the `failureDomainSubnets` mapping is not applied.
+- Note: The subnet injection for explicit ports only occurs when using `failureDomainSubnets`. Clusters using only the default `subnets` field maintain backward-compatible behavior where explicit ports are not modified.
 
 This feature is similar to AWS CAPA's multi-AZ subnet support and enables highly available control-plane deployments across isolated network segments in each availability zone.
 

@@ -359,6 +359,26 @@ control plane machines may be deployed to.</p>
 </tr>
 <tr>
 <td>
+<code>failureDomainSubnets</code><br/>
+<em>
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.FailureDomainSubnet">
+[]FailureDomainSubnet
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>FailureDomainSubnets is a mapping of availability zones to subnets.
+When specified, machines will be created in the subnet corresponding to their
+failure domain (availability zone). This enables deploying control-plane nodes
+across multiple subnets in different availability zones, similar to CAPA&rsquo;s
+multi-AZ subnet support.
+If a machine&rsquo;s failure domain is not found in this mapping, the default cluster
+subnet(s) will be used.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>controlPlaneOmitAvailabilityZone</code><br/>
 <em>
 bool
@@ -1651,6 +1671,54 @@ SubnetParam
 </tr>
 </tbody>
 </table>
+<h3 id="infrastructure.cluster.x-k8s.io/v1beta1.FailureDomainSubnet">FailureDomainSubnet
+</h3>
+<p>
+(<em>Appears on:</em>
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.OpenStackClusterSpec">OpenStackClusterSpec</a>)
+</p>
+<p>
+<p>FailureDomainSubnet maps an availability zone (failure domain) to a specific subnet.
+This allows control-plane and worker nodes to be placed in different subnets
+based on their failure domain (availability zone) placement.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>availabilityZone</code><br/>
+<em>
+string
+</em>
+</td>
+<td>
+<p>AvailabilityZone is the name of the Nova/Cinder availability zone that this
+subnet mapping applies to. This should match one of the availability zones
+configured in controlPlaneAvailabilityZones or used by MachineDeployments.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>subnet</code><br/>
+<em>
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.SubnetParam">
+SubnetParam
+</a>
+</em>
+</td>
+<td>
+<p>Subnet specifies the subnet to use for machines deployed in this availability zone.
+The subnet must be part of the cluster network.</p>
+</td>
+</tr>
+</tbody>
+</table>
 <h3 id="infrastructure.cluster.x-k8s.io/v1beta1.FilterByNeutronTags">FilterByNeutronTags
 </h3>
 <p>
@@ -2707,6 +2775,26 @@ control plane machines may be deployed to.</p>
 </tr>
 <tr>
 <td>
+<code>failureDomainSubnets</code><br/>
+<em>
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.FailureDomainSubnet">
+[]FailureDomainSubnet
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>FailureDomainSubnets is a mapping of availability zones to subnets.
+When specified, machines will be created in the subnet corresponding to their
+failure domain (availability zone). This enables deploying control-plane nodes
+across multiple subnets in different availability zones, similar to CAPA&rsquo;s
+multi-AZ subnet support.
+If a machine&rsquo;s failure domain is not found in this mapping, the default cluster
+subnet(s) will be used.</p>
+</td>
+</tr>
+<tr>
+<td>
 <code>controlPlaneOmitAvailabilityZone</code><br/>
 <em>
 bool
@@ -3314,6 +3402,26 @@ ControlPlaneEndpoint cannot be modified after ControlPlaneEndpoint.Host has been
 <em>(Optional)</em>
 <p>ControlPlaneAvailabilityZones is the set of availability zones which
 control plane machines may be deployed to.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>failureDomainSubnets</code><br/>
+<em>
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.FailureDomainSubnet">
+[]FailureDomainSubnet
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>FailureDomainSubnets is a mapping of availability zones to subnets.
+When specified, machines will be created in the subnet corresponding to their
+failure domain (availability zone). This enables deploying control-plane nodes
+across multiple subnets in different availability zones, similar to CAPA&rsquo;s
+multi-AZ subnet support.
+If a machine&rsquo;s failure domain is not found in this mapping, the default cluster
+subnet(s) will be used.</p>
 </td>
 </tr>
 <tr>
@@ -5746,6 +5854,7 @@ FilterByNeutronTags
 (<em>Appears on:</em>
 <a href="#infrastructure.cluster.x-k8s.io/v1beta1.APIServerLoadBalancer">APIServerLoadBalancer</a>, 
 <a href="#infrastructure.cluster.x-k8s.io/v1beta1.ExternalRouterIPParam">ExternalRouterIPParam</a>, 
+<a href="#infrastructure.cluster.x-k8s.io/v1beta1.FailureDomainSubnet">FailureDomainSubnet</a>, 
 <a href="#infrastructure.cluster.x-k8s.io/v1beta1.FixedIP">FixedIP</a>, 
 <a href="#infrastructure.cluster.x-k8s.io/v1beta1.OpenStackClusterSpec">OpenStackClusterSpec</a>)
 </p>

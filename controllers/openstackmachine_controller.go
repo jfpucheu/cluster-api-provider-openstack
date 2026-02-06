@@ -566,6 +566,7 @@ func openStackMachineSpecToOpenStackServerSpec(openStackMachineSpec *infrav1.Ope
 	// failure domain (availability zone), use the subnet from the mapping.
 	// Otherwise, fall back to the cluster's default subnets.
 	var clusterSubnets []infrav1.FixedIP
+	var failureDomainSubnetFound bool
 	if failureDomain != "" && len(openStackCluster.Spec.FailureDomainSubnets) > 0 {
 		// Look for a subnet mapping for this failure domain
 		for _, fdSubnet := range openStackCluster.Spec.FailureDomainSubnets {
@@ -575,6 +576,7 @@ func openStackMachineSpecToOpenStackServerSpec(openStackMachineSpec *infrav1.Ope
 						Subnet: &fdSubnet.Subnet,
 					},
 				}
+				failureDomainSubnetFound = true
 				break
 			}
 		}
@@ -596,6 +598,13 @@ func openStackMachineSpecToOpenStackServerSpec(openStackMachineSpec *infrav1.Ope
 			serverPort.Network = &infrav1.NetworkParam{
 				ID: &openStackCluster.Status.Network.ID,
 			}
+			serverPort.FixedIPs = clusterSubnets
+		} else if serverPort.Network != nil && len(serverPort.FixedIPs) == 0 && failureDomainSubnetFound {
+			// If the port has an explicit network but no FixedIPs, and a failure domain
+			// subnet mapping was found, inject it to ensure the port is created in the
+			// correct subnet for the availability zone.
+			// Note: We only inject subnets here when failureDomainSubnets is explicitly
+			// configured, to preserve backward compatibility for clusters without this feature.
 			serverPort.FixedIPs = clusterSubnets
 		}
 		// Only inject the default SG when portSecurity is not disabled,

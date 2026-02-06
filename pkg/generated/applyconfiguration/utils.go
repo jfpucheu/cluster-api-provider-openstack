@@ -76,6 +76,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &apiv1beta1.ClusterInitializationApplyConfiguration{}
 	case v1beta1.SchemeGroupVersion.WithKind("ExternalRouterIPParam"):
 		return &apiv1beta1.ExternalRouterIPParamApplyConfiguration{}
+	case v1beta1.SchemeGroupVersion.WithKind("FailureDomainSubnet"):
+		return &apiv1beta1.FailureDomainSubnetApplyConfiguration{}
 	case v1beta1.SchemeGroupVersion.WithKind("FilterByNeutronTags"):
 		return &apiv1beta1.FilterByNeutronTagsApplyConfiguration{}
 	case v1beta1.SchemeGroupVersion.WithKind("FixedIP"):
