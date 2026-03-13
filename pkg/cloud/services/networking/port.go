@@ -288,6 +288,23 @@ func getPortProfile(p *infrav1.BindingProfile) map[string]interface{} {
 	return portProfile
 }
 
+// UpdateAllowedAddressPairs replaces the allowed address pairs on a Neutron port.
+// Passing an empty slice clears all existing pairs.
+func (s *Service) UpdateAllowedAddressPairs(portID string, addressPairs []infrav1.AddressPair) error {
+	gophercloudPairs := make([]ports.AddressPair, 0, len(addressPairs))
+	for _, ap := range addressPairs {
+		gophercloudPairs = append(gophercloudPairs, ports.AddressPair{
+			IPAddress:  ap.IPAddress,
+			MACAddress: ptr.Deref(ap.MACAddress, ""),
+		})
+	}
+	updateOpts := ports.UpdateOpts{
+		AllowedAddressPairs: &gophercloudPairs,
+	}
+	_, err := s.client.UpdatePort(portID, updateOpts)
+	return err
+}
+
 // DeletePort deletes the Neutron port with the given ID.
 func (s *Service) DeletePort(eventObject runtime.Object, portID string) error {
 	var err error

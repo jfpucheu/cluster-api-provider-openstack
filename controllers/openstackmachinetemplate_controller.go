@@ -18,12 +18,14 @@ package controllers
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -34,6 +36,7 @@ import (
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-openstack/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/cloud/services/compute"
+	"sigs.k8s.io/cluster-api-provider-openstack/pkg/cloud/services/networking"
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/scope"
 	controllers "sigs.k8s.io/cluster-api-provider-openstack/pkg/utils/controllers"
 )
@@ -42,6 +45,7 @@ const imagePropertyForOS = "os_type"
 
 // Set here so we can easily mock it in tests.
 var newComputeService = compute.NewService
+var newNetworkingService = networking.NewService
 
 // OpenStackMachineTemplateReconciler reconciles a OpenStackMachineTemplate object.
 // it only updates the .status field to allow auto-scaling.
@@ -55,6 +59,9 @@ type OpenStackMachineTemplateReconciler struct {
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=openstackmachinetemplates,verbs=get;list;watch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=openstackmachinetemplates/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=openstackmachines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinesets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
 
 func (r *OpenStackMachineTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, reterr error) {
 	log := ctrl.LoggerFrom(ctx)
@@ -207,7 +214,142 @@ func (r *OpenStackMachineTemplateReconciler) reconcileNormal(ctx context.Context
 		}
 	}
 
+	if err := r.reconcileAllowedAddressPairs(ctx, scope, openStackMachineTemplate); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// reconcileAllowedAddressPairs updates the allowedAddressPairs on existing machine ports
+// to match what is defined in the OpenStackMachineTemplate.
+// It traverses MachineSets → Machines → OpenStackMachines to find the machines
+// that were created from this template, then compares the desired allowedAddressPairs
+// from the template against the machine's resolved port status. If they differ, it
+// calls Neutron to update the port and reflects the new state in the machine's status.
+func (r *OpenStackMachineTemplateReconciler) reconcileAllowedAddressPairs(ctx context.Context, scope *scope.WithLogger, openStackMachineTemplate *infrav1.OpenStackMachineTemplate) error {
+	log := scope.Logger()
+
+	// Skip if the template defines no ports (no allowedAddressPairs to reconcile).
+	if len(openStackMachineTemplate.Spec.Template.Spec.Ports) == 0 {
+		return nil
+	}
+
+	clusterName := openStackMachineTemplate.Labels[clusterv1.ClusterNameLabel]
+	if clusterName == "" {
+		// Template not yet associated with a cluster; nothing to reconcile.
+		return nil
+	}
+
+	// List all MachineSets in the namespace that belong to this cluster.
+	machineSetList := &clusterv1.MachineSetList{}
+	if err := r.Client.List(ctx, machineSetList,
+		client.InNamespace(openStackMachineTemplate.Namespace),
+		client.MatchingLabels{clusterv1.ClusterNameLabel: clusterName},
+	); err != nil {
+		return err
+	}
+
+	// List all Machines once (they are filtered by MachineSet ownership below).
+	machineList := &clusterv1.MachineList{}
+	if err := r.Client.List(ctx, machineList,
+		client.InNamespace(openStackMachineTemplate.Namespace),
+		client.MatchingLabels{clusterv1.ClusterNameLabel: clusterName},
+	); err != nil {
+		return err
+	}
+
+	templatePorts := openStackMachineTemplate.Spec.Template.Spec.Ports
+
+	// Networking service is created lazily on first actual port update.
+	var networkingService *networking.Service
+
+	for i := range machineSetList.Items {
+		ms := &machineSetList.Items[i]
+		// Only process MachineSets whose infrastructure template is this OSMT.
+		if ms.Spec.Template.Spec.InfrastructureRef.Name != openStackMachineTemplate.Name {
+			continue
+		}
+
+		for j := range machineList.Items {
+			machine := &machineList.Items[j]
+			if !isOwnedByMachineSet(machine, ms) {
+				continue
+			}
+			infraName := machine.Spec.InfrastructureRef.Name
+			if infraName == "" {
+				continue
+			}
+
+			openStackMachine := &infrav1.OpenStackMachine{}
+			if err := r.Client.Get(ctx, client.ObjectKey{
+				Namespace: openStackMachineTemplate.Namespace,
+				Name:      infraName,
+			}, openStackMachine); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return err
+			}
+
+			if openStackMachine.Status.Resources == nil || openStackMachine.Status.Resolved == nil {
+				continue
+			}
+
+			patchHelper, err := patch.NewHelper(openStackMachine, r.Client)
+			if err != nil {
+				return err
+			}
+
+			updated := false
+			for portIdx, portStatus := range openStackMachine.Status.Resources.Ports {
+				if portIdx >= len(templatePorts) || portIdx >= len(openStackMachine.Status.Resolved.Ports) {
+					break
+				}
+				desiredPairs := templatePorts[portIdx].AllowedAddressPairs
+				currentPairs := openStackMachine.Status.Resolved.Ports[portIdx].AllowedAddressPairs
+
+				if reflect.DeepEqual(currentPairs, desiredPairs) {
+					continue
+				}
+
+				// Lazily initialise the networking service on first use.
+				if networkingService == nil {
+					networkingService, err = newNetworkingService(scope)
+					if err != nil {
+						return err
+					}
+				}
+
+				log.Info("Updating allowedAddressPairs on port", "portID", portStatus.ID,
+					"machine", openStackMachine.Name, "portIndex", portIdx)
+				if err := networkingService.UpdateAllowedAddressPairs(portStatus.ID, desiredPairs); err != nil {
+					log.Error(err, "Failed to update allowedAddressPairs", "portID", portStatus.ID)
+					return err
+				}
+				openStackMachine.Status.Resolved.Ports[portIdx].AllowedAddressPairs = desiredPairs
+				updated = true
+			}
+
+			if updated {
+				if err := patchHelper.Patch(ctx, openStackMachine); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// isOwnedByMachineSet returns true if the Machine has an owner reference pointing to the given MachineSet.
+func isOwnedByMachineSet(machine *clusterv1.Machine, ms *clusterv1.MachineSet) bool {
+	for _, ref := range machine.OwnerReferences {
+		if ref.Kind == "MachineSet" && ref.Name == ms.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *OpenStackMachineTemplateReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {

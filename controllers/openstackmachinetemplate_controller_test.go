@@ -23,6 +23,7 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	. "github.com/onsi/gomega" //nolint:revive
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
@@ -430,5 +431,232 @@ func newOSCluster(name string) *infrav1.OpenStackCluster {
 			Namespace: "test-ns",
 			Name:      name,
 		},
+	}
+}
+
+func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *testing.T) {
+	const (
+		ns          = "test-ns"
+		clusterName = "test-cluster"
+		osmtName    = "test-osmt"
+		msName      = "test-ms"
+		machineName = "test-machine"
+		osmName     = "test-osm"
+		portID      = "aaaa-bbbb-cccc-dddd"
+	)
+
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = clusterv1.AddToScheme(scheme)
+	_ = infrav1.AddToScheme(scheme)
+
+	// openStackMachine returns an OpenStackMachine with port portID in resources,
+	// and currentPairs as the currently-resolved allowedAddressPairs.
+	buildOSM := func(currentPairs []infrav1.AddressPair) *infrav1.OpenStackMachine {
+		return &infrav1.OpenStackMachine{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: osmName},
+			Status: infrav1.OpenStackMachineStatus{
+				Resources: &infrav1.MachineResources{
+					Ports: []infrav1.PortStatus{{ID: portID}},
+				},
+				Resolved: &infrav1.ResolvedMachineSpec{
+					Ports: []infrav1.ResolvedPortSpec{
+						{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+							AllowedAddressPairs: currentPairs,
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	// buildMachineSet returns a MachineSet that references osmtName as its infrastructure template.
+	buildMachineSet := func() *clusterv1.MachineSet {
+		return &clusterv1.MachineSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns, Name: msName,
+				Labels: map[string]string{clusterv1.ClusterNameLabel: clusterName},
+				UID:     types.UID("ms-uid"),
+			},
+			Spec: clusterv1.MachineSetSpec{
+				ClusterName: clusterName,
+				Selector:    metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+				Template: clusterv1.MachineTemplateSpec{
+					Spec: clusterv1.MachineSpec{
+						ClusterName: clusterName,
+						InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+							Name: osmtName,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// buildMachine returns a Machine owned by msName whose infra ref points to osmName.
+	buildMachine := func() *clusterv1.Machine {
+		return &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns, Name: machineName,
+				Labels: map[string]string{clusterv1.ClusterNameLabel: clusterName},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "MachineSet", Name: msName, UID: "ms-uid"},
+				},
+			},
+			Spec: clusterv1.MachineSpec{
+				ClusterName: clusterName,
+				InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+					Name: osmName,
+				},
+			},
+		}
+	}
+
+	// desiredPairs is what the template declares.
+	desiredPairs := []infrav1.AddressPair{
+		{IPAddress: "10.0.0.1"},
+		{IPAddress: "10.0.0.2"},
+	}
+
+	// buildOSMT returns a template with one port carrying desiredPairs.
+	buildOSMT := func() *infrav1.OpenStackMachineTemplate {
+		return &infrav1.OpenStackMachineTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns, Name: osmtName,
+				Labels: map[string]string{clusterv1.ClusterNameLabel: clusterName},
+			},
+			Spec: infrav1.OpenStackMachineTemplateSpec{
+				Template: infrav1.OpenStackMachineTemplateResource{
+					Spec: infrav1.OpenStackMachineSpec{
+						FlavorID: ptr.To(flavorID),
+						Image:    infrav1.ImageParam{ID: &imageID},
+						Ports: []infrav1.PortOpts{
+							{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+								AllowedAddressPairs: desiredPairs,
+							}},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		osmt          *infrav1.OpenStackMachineTemplate
+		extraObjects  []client.Object
+		expectNetwork func(m *scope.MockScopeFactory)
+		wantErr       bool
+		verify        func(g Gomega, cl client.Client)
+	}{
+		{
+			name: "no ports in template - networking service never called",
+			osmt: func() *infrav1.OpenStackMachineTemplate {
+				t := buildOSMT()
+				t.Spec.Template.Spec.Ports = nil
+				return t
+			}(),
+			extraObjects:  []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
+			expectNetwork: func(*scope.MockScopeFactory) {},
+		},
+		{
+			name: "no cluster label on template - networking service never called",
+			osmt: func() *infrav1.OpenStackMachineTemplate {
+				t := buildOSMT()
+				delete(t.Labels, clusterv1.ClusterNameLabel)
+				return t
+			}(),
+			extraObjects:  []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
+			expectNetwork: func(*scope.MockScopeFactory) {},
+		},
+		{
+			name:         "no matching MachineSet - networking service never called",
+			osmt:         buildOSMT(),
+			extraObjects: []client.Object{buildMachine(), buildOSM(nil)},
+			// MachineSet is absent → no machines found
+			expectNetwork: func(*scope.MockScopeFactory) {},
+		},
+		{
+			name: "allowedAddressPairs already match - no UpdatePort call",
+			osmt: buildOSMT(),
+			extraObjects: []client.Object{
+				buildMachineSet(),
+				buildMachine(),
+				buildOSM(desiredPairs), // already up to date
+			},
+			expectNetwork: func(*scope.MockScopeFactory) {},
+		},
+		{
+			name: "machine has no resolved status - no UpdatePort call",
+			osmt: buildOSMT(),
+			extraObjects: []client.Object{
+				buildMachineSet(),
+				buildMachine(),
+				func() *infrav1.OpenStackMachine {
+					osm := buildOSM(nil)
+					osm.Status.Resolved = nil
+					return osm
+				}(),
+			},
+			expectNetwork: func(*scope.MockScopeFactory) {},
+		},
+		{
+			name: "allowedAddressPairs differ - UpdatePort called and machine status updated",
+			osmt: buildOSMT(),
+			extraObjects: []client.Object{
+				buildMachineSet(),
+				buildMachine(),
+				buildOSM([]infrav1.AddressPair{{IPAddress: "1.2.3.4"}}), // stale
+			},
+			expectNetwork: func(mf *scope.MockScopeFactory) {
+				mf.NetworkClient.EXPECT().
+					UpdatePort(portID, gomock.Any()).
+					Return(&ports.Port{ID: portID}, nil)
+			},
+			verify: func(g Gomega, cl client.Client) {
+				// The machine's resolved status should now carry the desired pairs.
+				osm := &infrav1.OpenStackMachine{}
+				g.Expect(cl.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: osmName}, osm)).To(Succeed())
+				g.Expect(osm.Status.Resolved.Ports[0].AllowedAddressPairs).To(ConsistOf(desiredPairs))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			allObjects := append([]client.Object{tt.osmt}, tt.extraObjects...)
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(allObjects...).
+				WithStatusSubresource(&infrav1.OpenStackMachine{}).
+				Build()
+
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+
+			mf := scope.NewMockScopeFactory(mockCtrl, "proj")
+			tt.expectNetwork(mf)
+
+			log := ctrl.Log.WithName("test")
+			withLogger := scope.NewWithLogger(mf, log)
+
+			r := &OpenStackMachineTemplateReconciler{
+				Client:       cl,
+				ScopeFactory: mf,
+			}
+
+			err := r.reconcileAllowedAddressPairs(context.Background(), withLogger, tt.osmt)
+			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+			}
+
+			if tt.verify != nil {
+				tt.verify(g, cl)
+			}
+		})
 	}
 }

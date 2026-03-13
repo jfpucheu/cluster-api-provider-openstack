@@ -145,6 +145,75 @@ func TestOpenStackMachineTemplate_ValidateUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "allowedAddressPairs change is permitted",
+			oldTemplate: &infrav1.OpenStackMachineTemplate{
+				Spec: infrav1.OpenStackMachineTemplateSpec{
+					Template: infrav1.OpenStackMachineTemplateResource{
+						Spec: infrav1.OpenStackMachineSpec{
+							Flavor: ptr.To("foo"),
+							Ports: []infrav1.PortOpts{
+								{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+									AllowedAddressPairs: []infrav1.AddressPair{{IPAddress: "1.2.3.4"}},
+								}},
+							},
+						},
+					},
+				},
+			},
+			newTemplate: &infrav1.OpenStackMachineTemplate{
+				Spec: infrav1.OpenStackMachineTemplateSpec{
+					Template: infrav1.OpenStackMachineTemplateResource{
+						Spec: infrav1.OpenStackMachineSpec{
+							Flavor: ptr.To("foo"),
+							Ports: []infrav1.PortOpts{
+								{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+									AllowedAddressPairs: []infrav1.AddressPair{
+										{IPAddress: "1.2.3.4"},
+										{IPAddress: "5.6.7.8"},
+									},
+								}},
+							},
+						},
+					},
+				},
+			},
+			req:     &admission.Request{},
+			wantErr: false,
+		},
+		{
+			name: "allowedAddressPairs change combined with immutable field change is rejected",
+			oldTemplate: &infrav1.OpenStackMachineTemplate{
+				Spec: infrav1.OpenStackMachineTemplateSpec{
+					Template: infrav1.OpenStackMachineTemplateResource{
+						Spec: infrav1.OpenStackMachineSpec{
+							Flavor: ptr.To("foo"),
+							Ports: []infrav1.PortOpts{
+								{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+									AllowedAddressPairs: []infrav1.AddressPair{{IPAddress: "1.2.3.4"}},
+								}},
+							},
+						},
+					},
+				},
+			},
+			newTemplate: &infrav1.OpenStackMachineTemplate{
+				Spec: infrav1.OpenStackMachineTemplateSpec{
+					Template: infrav1.OpenStackMachineTemplateResource{
+						Spec: infrav1.OpenStackMachineSpec{
+							Flavor: ptr.To("bar"), // immutable field changed
+							Ports: []infrav1.PortOpts{
+								{ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+									AllowedAddressPairs: []infrav1.AddressPair{{IPAddress: "5.6.7.8"}},
+								}},
+							},
+						},
+					},
+				},
+			},
+			req:     &admission.Request{},
+			wantErr: true,
+		},
+		{
 			name: "allow modification, dry run, skip immutability annotation set",
 			oldTemplate: &infrav1.OpenStackMachineTemplate{
 				Spec: infrav1.OpenStackMachineTemplateSpec{
