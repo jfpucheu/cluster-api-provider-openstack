@@ -135,14 +135,14 @@ func (r *OpenStackMachineTemplateReconciler) Reconcile(ctx context.Context, req 
 	}()
 
 	// Handle non-deleted OpenStackMachineTemplates
-	if err := r.reconcileNormal(ctx, scope, openStackMachineTemplate); err != nil {
+	if err := r.reconcileNormal(ctx, scope, cluster.Name, openStackMachineTemplate); err != nil {
 		return ctrl.Result{}, err
 	}
 	log.V(4).Info("Successfully reconciled OpenStackMachineTemplate")
 	return ctrl.Result{}, nil
 }
 
-func (r *OpenStackMachineTemplateReconciler) reconcileNormal(ctx context.Context, scope *scope.WithLogger, openStackMachineTemplate *infrav1.OpenStackMachineTemplate) (reterr error) {
+func (r *OpenStackMachineTemplateReconciler) reconcileNormal(ctx context.Context, scope *scope.WithLogger, clusterName string, openStackMachineTemplate *infrav1.OpenStackMachineTemplate) (reterr error) {
 	log := scope.Logger()
 
 	computeService, err := newComputeService(scope)
@@ -214,7 +214,7 @@ func (r *OpenStackMachineTemplateReconciler) reconcileNormal(ctx context.Context
 		}
 	}
 
-	if err := r.reconcileAllowedAddressPairs(ctx, scope, openStackMachineTemplate); err != nil {
+	if err := r.reconcileAllowedAddressPairs(ctx, scope, clusterName, openStackMachineTemplate); err != nil {
 		return err
 	}
 
@@ -227,7 +227,7 @@ func (r *OpenStackMachineTemplateReconciler) reconcileNormal(ctx context.Context
 // that were created from this template, then compares the desired allowedAddressPairs
 // from the template against the machine's resolved port status. If they differ, it
 // calls Neutron to update the port and reflects the new state in the machine's status.
-func (r *OpenStackMachineTemplateReconciler) reconcileAllowedAddressPairs(ctx context.Context, scope *scope.WithLogger, openStackMachineTemplate *infrav1.OpenStackMachineTemplate) error {
+func (r *OpenStackMachineTemplateReconciler) reconcileAllowedAddressPairs(ctx context.Context, scope *scope.WithLogger, clusterName string, openStackMachineTemplate *infrav1.OpenStackMachineTemplate) error {
 	log := scope.Logger()
 
 	// Skip if the template defines no ports (no allowedAddressPairs to reconcile).
@@ -235,9 +235,7 @@ func (r *OpenStackMachineTemplateReconciler) reconcileAllowedAddressPairs(ctx co
 		return nil
 	}
 
-	clusterName := openStackMachineTemplate.Labels[clusterv1.ClusterNameLabel]
 	if clusterName == "" {
-		// Template not yet associated with a cluster; nothing to reconcile.
 		return nil
 	}
 

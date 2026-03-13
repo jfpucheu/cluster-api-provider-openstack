@@ -345,7 +345,7 @@ func TestOpenStackMachineTemplateReconciler_reconcileNormal(t *testing.T) {
 
 			tt.expect(mf)
 
-			err := r.reconcileNormal(ctx, withLogger, tpl)
+			err := r.reconcileNormal(ctx, withLogger, "test-cluster", tpl)
 
 			if tt.wantErr == "" {
 				g.Expect(err).ToNot(HaveOccurred())
@@ -542,12 +542,13 @@ func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *test
 	}
 
 	tests := []struct {
-		name          string
-		osmt          *infrav1.OpenStackMachineTemplate
-		extraObjects  []client.Object
-		expectNetwork func(m *scope.MockScopeFactory)
-		wantErr       bool
-		verify        func(g Gomega, cl client.Client)
+		name            string
+		clusterNameArg  string
+		osmt            *infrav1.OpenStackMachineTemplate
+		extraObjects    []client.Object
+		expectNetwork   func(m *scope.MockScopeFactory)
+		wantErr         bool
+		verify          func(g Gomega, cl client.Client)
 	}{
 		{
 			name: "no ports in template - networking service never called",
@@ -556,29 +557,29 @@ func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *test
 				t.Spec.Template.Spec.Ports = nil
 				return t
 			}(),
-			extraObjects:  []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
-			expectNetwork: func(*scope.MockScopeFactory) {},
+			clusterNameArg: clusterName,
+			extraObjects:   []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
+			expectNetwork:  func(*scope.MockScopeFactory) {},
 		},
 		{
-			name: "no cluster label on template - networking service never called",
-			osmt: func() *infrav1.OpenStackMachineTemplate {
-				t := buildOSMT()
-				delete(t.Labels, clusterv1.ClusterNameLabel)
-				return t
-			}(),
-			extraObjects:  []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
-			expectNetwork: func(*scope.MockScopeFactory) {},
+			name:           "empty clusterName - networking service never called",
+			clusterNameArg: "",
+			osmt:           buildOSMT(),
+			extraObjects:   []client.Object{buildMachineSet(), buildMachine(), buildOSM(nil)},
+			expectNetwork:  func(*scope.MockScopeFactory) {},
 		},
 		{
-			name:         "no matching MachineSet - networking service never called",
-			osmt:         buildOSMT(),
-			extraObjects: []client.Object{buildMachine(), buildOSM(nil)},
+			name:           "no matching MachineSet - networking service never called",
+			clusterNameArg: clusterName,
+			osmt:           buildOSMT(),
+			extraObjects:   []client.Object{buildMachine(), buildOSM(nil)},
 			// MachineSet is absent → no machines found
 			expectNetwork: func(*scope.MockScopeFactory) {},
 		},
 		{
-			name: "allowedAddressPairs already match - no UpdatePort call",
-			osmt: buildOSMT(),
+			name:           "allowedAddressPairs already match - no UpdatePort call",
+			clusterNameArg: clusterName,
+			osmt:           buildOSMT(),
 			extraObjects: []client.Object{
 				buildMachineSet(),
 				buildMachine(),
@@ -587,8 +588,9 @@ func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *test
 			expectNetwork: func(*scope.MockScopeFactory) {},
 		},
 		{
-			name: "machine has no resolved status - no UpdatePort call",
-			osmt: buildOSMT(),
+			name:           "machine has no resolved status - no UpdatePort call",
+			clusterNameArg: clusterName,
+			osmt:           buildOSMT(),
 			extraObjects: []client.Object{
 				buildMachineSet(),
 				buildMachine(),
@@ -601,8 +603,9 @@ func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *test
 			expectNetwork: func(*scope.MockScopeFactory) {},
 		},
 		{
-			name: "allowedAddressPairs differ - UpdatePort called and machine status updated",
-			osmt: buildOSMT(),
+			name:           "allowedAddressPairs differ - UpdatePort called and machine status updated",
+			clusterNameArg: clusterName,
+			osmt:           buildOSMT(),
 			extraObjects: []client.Object{
 				buildMachineSet(),
 				buildMachine(),
@@ -647,7 +650,7 @@ func TestOpenStackMachineTemplateReconciler_reconcileAllowedAddressPairs(t *test
 				ScopeFactory: mf,
 			}
 
-			err := r.reconcileAllowedAddressPairs(context.Background(), withLogger, tt.osmt)
+			err := r.reconcileAllowedAddressPairs(context.Background(), withLogger, tt.clusterNameArg, tt.osmt)
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

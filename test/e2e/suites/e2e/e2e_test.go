@@ -697,6 +697,99 @@ var _ = Describe("e2e tests [PR-Blocking]", func() {
 			_, err = ports.Get(ctx, networkClient, subPort.ID).Extract()
 			Expect(gophercloud.ResponseCodeIs(err, 404)).To(BeTrue())
 		})
+
+		It("should reconcile allowedAddressPairs on existing ports when OSMT is updated", func(ctx context.Context) {
+			shared.Logf("Creating a cluster")
+			clusterName := fmt.Sprintf("cluster-%s", namespace.Name)
+			configCluster := defaultConfigCluster(clusterName, namespace.Name)
+			configCluster.ControlPlaneMachineCount = ptr.To(int64(1))
+			configCluster.WorkerMachineCount = ptr.To(int64(1))
+			configCluster.Flavor = shared.FlavorWithoutLB
+			createCluster(ctx, configCluster, clusterResources)
+
+			testTag := utilrand.String(6)
+			initialPair := "192.168.100.0/24"
+			updatedPair := "10.10.10.0/24"
+
+			mdName := clusterName + "-md-aap"
+			portOpts := &[]infrav1.PortOpts{
+				{
+					ResolvedPortSpecFields: infrav1.ResolvedPortSpecFields{
+						AllowedAddressPairs: []infrav1.AddressPair{
+							{IPAddress: initialPair},
+						},
+					},
+				},
+			}
+
+			osmt := makeOpenStackMachineTemplateWithPortOptions(namespace.Name, clusterName, mdName, portOpts, []string{testTag})
+			machineDeployment := makeMachineDeployment(namespace.Name, mdName, clusterName, "", 1)
+			framework.CreateMachineDeployment(ctx, framework.CreateMachineDeploymentInput{
+				Creator:                 e2eCtx.Environment.BootstrapClusterProxy.GetClient(),
+				MachineDeployment:       machineDeployment,
+				BootstrapConfigTemplate: makeJoinBootstrapConfigTemplate(namespace.Name, mdName),
+				InfraMachineTemplate:    osmt,
+			})
+
+			shared.Logf("Waiting for the port with initial allowedAddressPairs to be created in Neutron")
+			var portList []ports.Port
+			Eventually(func() int {
+				var err error
+				portList, err = shared.DumpOpenStackPorts(e2eCtx, ports.ListOpts{Tags: testTag})
+				Expect(err).To(BeNil())
+				return len(portList)
+			}, e2eCtx.E2EConfig.GetIntervals(specName, "wait-worker-nodes")...).Should(BeNumerically(">=", 1))
+
+			machinePort := portList[0]
+			Expect(machinePort.AllowedAddressPairs).To(HaveLen(1))
+			Expect(machinePort.AllowedAddressPairs[0].IPAddress).To(Equal(initialPair))
+
+			shared.Logf("Updating OSMT allowedAddressPairs to %s", updatedPair)
+			c := e2eCtx.Environment.BootstrapClusterProxy.GetClient()
+			osmtFetched := &infrav1.OpenStackMachineTemplate{}
+			Expect(c.Get(ctx, apimachinerytypes.NamespacedName{Namespace: namespace.Name, Name: mdName}, osmtFetched)).To(Succeed())
+
+			osmtUpdated := osmtFetched.DeepCopy()
+			osmtUpdated.Spec.Template.Spec.Ports[0].AllowedAddressPairs = []infrav1.AddressPair{
+				{IPAddress: initialPair},
+				{IPAddress: updatedPair},
+			}
+			Expect(c.Update(ctx, osmtUpdated)).To(Succeed())
+
+			shared.Logf("Waiting for CAPO controller to reconcile and update port allowedAddressPairs in Neutron")
+			Eventually(func() []ports.AddressPair {
+				updatedPorts, err := shared.DumpOpenStackPorts(e2eCtx, ports.ListOpts{Tags: testTag})
+				Expect(err).To(BeNil())
+				if len(updatedPorts) == 0 {
+					return nil
+				}
+				return updatedPorts[0].AllowedAddressPairs
+			}, e2eCtx.E2EConfig.GetIntervals(specName, "wait-worker-nodes")...).Should(ConsistOf(
+				MatchFields(IgnoreExtras, Fields{"IPAddress": Equal(initialPair)}),
+				MatchFields(IgnoreExtras, Fields{"IPAddress": Equal(updatedPair)}),
+			))
+
+			shared.Logf("Verified allowedAddressPairs updated on Neutron port %s", machinePort.ID)
+
+			shared.Logf("Verifying OpenStackMachine status reflects the updated allowedAddressPairs")
+			machines := framework.GetMachinesByMachineDeployments(ctx, framework.GetMachinesByMachineDeploymentsInput{
+				Lister:            c,
+				ClusterName:       clusterName,
+				Namespace:         namespace.Name,
+				MachineDeployment: *machineDeployment,
+			})
+			Expect(machines).To(HaveLen(1))
+			infraName := machines[0].Spec.InfrastructureRef.Name
+
+			osm := &infrav1.OpenStackMachine{}
+			Expect(c.Get(ctx, apimachinerytypes.NamespacedName{Namespace: namespace.Name, Name: infraName}, osm)).To(Succeed())
+			Expect(osm.Status.Resolved).NotTo(BeNil())
+			Expect(osm.Status.Resolved.Ports).To(HaveLen(1))
+			Expect(osm.Status.Resolved.Ports[0].AllowedAddressPairs).To(ConsistOf(
+				infrav1.AddressPair{IPAddress: initialPair},
+				infrav1.AddressPair{IPAddress: updatedPair},
+			))
+		})
 	})
 
 	Describe("Workload cluster (multiple attached networks)", func() {
